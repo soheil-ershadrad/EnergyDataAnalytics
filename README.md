@@ -1,4 +1,4 @@
-# Swedish Electricity Price Analytics Pipeline
+# Swedish Electricity Price Database and Analytics via Snowflake
 
 ## Business Problem
 Energy companies need reliable, timely data on electricity 
