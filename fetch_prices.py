@@ -501,6 +501,22 @@ telegram_df = pd.read_sql(
     conn
 )
 
+# -----------------------------------
+# REMOVE DUPLICATES
+# -----------------------------------
+
+telegram_df = telegram_df.drop_duplicates(
+    subset=["TARGET_DATETIME"]
+)
+
+telegram_df = telegram_df.sort_values(
+    "TARGET_DATETIME"
+)
+
+telegram_df = telegram_df.reset_index(
+    drop=True
+)
+
 if not telegram_df.empty:
 
     # -----------------------------------
