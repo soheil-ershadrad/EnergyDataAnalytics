@@ -112,7 +112,7 @@ conn = snowflake.connector.connect(
     account=os.environ["SNOWFLAKE_ACCOUNT"],
     warehouse=os.environ["SNOWFLAKE_WAREHOUSE"],
     database=os.environ["SNOWFLAKE_DATABASE"],
-    schema=os.environ["SNOWFLAKE_SCHEMA"]
+    schema=os.environ["SNOWFLAKE_SCHEMA"],
     role=os.environ["SNOWFLAKE_ROLE"],
 )
 
