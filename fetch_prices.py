@@ -433,7 +433,6 @@ if not forecast_df.empty:
 
     )
 
-    # Snowflake column names
     forecast_df.columns = [
 
         "TARGET_DATETIME",
@@ -547,6 +546,18 @@ if not telegram_df.empty:
     expensive_hours = telegram_df[
         telegram_df["SE3"] >= high_threshold
     ]["TARGET_DATETIME"]
+
+    # -----------------------------------
+    # KEEP ONLY ROUND HOURS
+    # -----------------------------------
+
+    cheap_hours = cheap_hours[
+        cheap_hours.dt.minute == 0
+    ]
+
+    expensive_hours = expensive_hours[
+        expensive_hours.dt.minute == 0
+    ]
 
     # -----------------------------------
     # FORMAT HOURS
