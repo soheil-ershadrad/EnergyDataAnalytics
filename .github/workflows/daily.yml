@@ -1,12 +1,14 @@
 name: Daily Electricity Prices
 
 on:
+
   schedule:
     - cron: '5 0 * * *'
 
   workflow_dispatch:
 
 jobs:
+
   run-script:
 
     runs-on: ubuntu-latest
@@ -23,17 +25,32 @@ jobs:
 
       - name: Install dependencies
         run: |
+
           pip install --upgrade pip
+
           pip install pandas
+
           pip install requests
+
           pip install "snowflake-connector-python[pandas]"
 
       - name: Run ETL
         run: python fetch_prices.py
+
         env:
+
           SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+
           SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
+
           SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+
           SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+
           SNOWFLAKE_DATABASE: ${{ secrets.SNOWFLAKE_DATABASE }}
+
           SNOWFLAKE_SCHEMA: ${{ secrets.SNOWFLAKE_SCHEMA }}
+
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
