@@ -108,11 +108,17 @@ if df.empty:
     print("No actual data fetched.")
     exit()
 
-# Convert datetime
-df["datetime"] = pd.to_datetime(df["datetime"])
+# -----------------------------------
+# HANDLE TIMEZONES SAFELY
+# -----------------------------------
 
-# Remove timezone
-df["datetime"] = df["datetime"].dt.tz_localize(None)
+df["datetime"] = pd.to_datetime(
+    df["datetime"],
+    utc=True
+)
+
+# Remove timezone for Snowflake
+df["datetime"] = df["datetime"].dt.tz_convert(None)
 
 # Sort
 df = df.sort_values("datetime")
@@ -271,13 +277,18 @@ forecast_df = pd.DataFrame(forecast_rows)
 
 if not forecast_df.empty:
 
+    # -----------------------------------
+    # HANDLE FORECAST TIMEZONES
+    # -----------------------------------
+
     forecast_df["datetime"] = pd.to_datetime(
-        forecast_df["datetime"]
+        forecast_df["datetime"],
+        utc=True
     )
 
     forecast_df["datetime"] = (
         forecast_df["datetime"]
-        .dt.tz_localize(None)
+        .dt.tz_convert(None)
     )
 
     forecast_df = forecast_df.sort_values("datetime")
