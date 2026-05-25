@@ -22,7 +22,11 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          pip install --upgrade pip
+          pip install pandas
+          pip install requests
+          pip install "snowflake-connector-python[pandas]"
 
       - name: Run ETL
         run: python fetch_prices.py
