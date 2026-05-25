@@ -5,6 +5,8 @@ from datetime import datetime, timedelta
 import time
 import snowflake.connector
 
+from snowflake.connector.pandas_tools import write_pandas
+
 # ===================================
 # SETTINGS
 # ===================================
@@ -16,9 +18,9 @@ zones = ["SE1", "SE2", "SE3", "SE4"]
 # ===================================
 
 # Set to True ONLY ONCE
-# to load historical data
+# for historical upload
 
-BACKFILL_MODE = True
+BACKFILL_MODE = False
 
 if BACKFILL_MODE:
     days_back = 365
@@ -42,7 +44,13 @@ current_date = start_date
 
 while current_date <= end_date:
 
-    print(f"Fetching actual prices for {current_date}")
+    progress = (current_date - start_date).days + 1
+
+    print(
+        f"Fetching actual prices for "
+        f"{current_date} "
+        f"({progress}/{days_back + 1})"
+    )
 
     daily_data = {}
 
@@ -55,10 +63,18 @@ while current_date <= end_date:
 
         try:
 
-            response = requests.get(url, timeout=20)
+            response = requests.get(
+                url,
+                timeout=20
+            )
 
             if response.status_code != 200:
-                print(f"Failed for {zone} on {current_date}")
+
+                print(
+                    f"Failed for {zone} "
+                    f"on {current_date}"
+                )
+
                 continue
 
             data = response.json()
@@ -66,6 +82,7 @@ while current_date <= end_date:
             for hour_entry in data:
 
                 timestamp = hour_entry["time_start"]
+
                 price = hour_entry["SEK_per_kWh"]
 
                 if timestamp not in daily_data:
@@ -75,7 +92,10 @@ while current_date <= end_date:
 
         except Exception as e:
 
-            print(f"Error for {zone} on {current_date}: {e}")
+            print(
+                f"Error for {zone} "
+                f"on {current_date}: {e}"
+            )
 
     # -----------------------------------
     # CONVERT TO ROWS
@@ -105,11 +125,13 @@ while current_date <= end_date:
 df = pd.DataFrame(all_data)
 
 if df.empty:
+
     print("No actual data fetched.")
+
     exit()
 
 # -----------------------------------
-# HANDLE TIMEZONES SAFELY
+# HANDLE TIMEZONES
 # -----------------------------------
 
 df["datetime"] = pd.to_datetime(
@@ -117,19 +139,24 @@ df["datetime"] = pd.to_datetime(
     utc=True
 )
 
-# Remove timezone for Snowflake
-df["datetime"] = df["datetime"].dt.tz_convert(None)
+df["datetime"] = (
+    df["datetime"]
+    .dt.tz_convert(None)
+)
 
 # Sort
 df = df.sort_values("datetime")
 
 # Remove duplicates
-df = df.drop_duplicates(subset=["datetime"])
+df = df.drop_duplicates(
+    subset=["datetime"]
+)
 
 # Reset index
 df = df.reset_index(drop=True)
 
 print("\nActual prices preview:")
+
 print(df.head())
 
 # ===================================
@@ -149,11 +176,16 @@ try:
         schema=os.environ["SNOWFLAKE_SCHEMA"],
     )
 
-    print("Snowflake connection successful!")
+    print(
+        "Snowflake connection successful!"
+    )
 
 except Exception as e:
 
-    print("Snowflake connection failed:")
+    print(
+        "Snowflake connection failed:"
+    )
+
     print(e)
 
     raise
@@ -164,63 +196,75 @@ cur = conn.cursor()
 # DELETE EXISTING ACTUAL ROWS
 # ===================================
 
-min_dt = df["datetime"].min().strftime("%Y-%m-%d %H:%M:%S")
-max_dt = df["datetime"].max().strftime("%Y-%m-%d %H:%M:%S")
+min_dt = (
+    df["datetime"]
+    .min()
+    .strftime("%Y-%m-%d %H:%M:%S")
+)
 
-print(f"\nDeleting existing actual rows between {min_dt} and {max_dt}")
+max_dt = (
+    df["datetime"]
+    .max()
+    .strftime("%Y-%m-%d %H:%M:%S")
+)
+
+print(
+    f"\nDeleting existing rows "
+    f"between {min_dt} and {max_dt}"
+)
 
 delete_sql = """
 DELETE FROM electricity_prices
 WHERE datetime BETWEEN %s AND %s
 """
 
-cur.execute(delete_sql, (min_dt, max_dt))
-
-# ===================================
-# INSERT ACTUAL PRICES
-# ===================================
-
-print("\nInserting actual prices...")
-
-insert_sql = """
-INSERT INTO electricity_prices (
-    datetime,
-    se1,
-    se2,
-    se3,
-    se4
+cur.execute(
+    delete_sql,
+    (min_dt, max_dt)
 )
-VALUES (%s, %s, %s, %s, %s)
-"""
 
-rows_inserted = 0
+# ===================================
+# BULK INSERT ACTUAL PRICES
+# ===================================
 
-for _, row in df.iterrows():
+print("\nBulk inserting actual prices...")
 
-    cur.execute(
-        insert_sql,
-        (
-            row["datetime"].strftime("%Y-%m-%d %H:%M:%S"),
-            row["SE1"],
-            row["SE2"],
-            row["SE3"],
-            row["SE4"],
-        )
-    )
+# Convert datetime to string
+df["datetime"] = (
+    df["datetime"]
+    .dt.strftime("%Y-%m-%d %H:%M:%S")
+)
 
-    rows_inserted += 1
+# Snowflake column names
+df.columns = [
+    "DATETIME",
+    "SE1",
+    "SE2",
+    "SE3",
+    "SE4"
+]
 
-conn.commit()
+success, nchunks, nrows, _ = write_pandas(
+    conn,
+    df,
+    table_name="ELECTRICITY_PRICES",
+    auto_create_table=False
+)
 
-print(f"\nInserted {rows_inserted} actual rows.")
+print(f"\nInserted {nrows} actual rows.")
 
 # ===================================
 # FORECAST SECTION
 # ===================================
 
-print("\nFetching tomorrow forecast prices...")
+print(
+    "\nFetching tomorrow forecast prices..."
+)
 
-tomorrow_date = datetime.today().date() + timedelta(days=1)
+tomorrow_date = (
+    datetime.today().date()
+    + timedelta(days=1)
+)
 
 forecast_data = {}
 
@@ -233,10 +277,18 @@ for zone in zones:
 
     try:
 
-        response = requests.get(url, timeout=20)
+        response = requests.get(
+            url,
+            timeout=20
+        )
 
         if response.status_code != 200:
-            print(f"No forecast available for {zone}")
+
+            print(
+                f"No forecast available "
+                f"for {zone}"
+            )
+
             continue
 
         data = response.json()
@@ -244,6 +296,7 @@ for zone in zones:
         for hour_entry in data:
 
             timestamp = hour_entry["time_start"]
+
             price = hour_entry["SEK_per_kWh"]
 
             if timestamp not in forecast_data:
@@ -253,7 +306,10 @@ for zone in zones:
 
     except Exception as e:
 
-        print(f"Forecast error for {zone}: {e}")
+        print(
+            f"Forecast error "
+            f"for {zone}: {e}"
+        )
 
 # ===================================
 # FORECAST DATAFRAME
@@ -264,7 +320,7 @@ forecast_rows = []
 for timestamp, zone_prices in forecast_data.items():
 
     row = {
-        "datetime": timestamp,
+        "target_datetime": timestamp,
         "SE1": zone_prices.get("SE1"),
         "SE2": zone_prices.get("SE2"),
         "SE3": zone_prices.get("SE3"),
@@ -273,74 +329,89 @@ for timestamp, zone_prices in forecast_data.items():
 
     forecast_rows.append(row)
 
-forecast_df = pd.DataFrame(forecast_rows)
+forecast_df = pd.DataFrame(
+    forecast_rows
+)
 
 if not forecast_df.empty:
 
     # -----------------------------------
-    # HANDLE FORECAST TIMEZONES
+    # HANDLE TIMEZONES
     # -----------------------------------
 
-    forecast_df["datetime"] = pd.to_datetime(
-        forecast_df["datetime"],
-        utc=True
+    forecast_df["target_datetime"] = (
+        pd.to_datetime(
+            forecast_df["target_datetime"],
+            utc=True
+        )
     )
 
-    forecast_df["datetime"] = (
-        forecast_df["datetime"]
+    forecast_df["target_datetime"] = (
+        forecast_df["target_datetime"]
         .dt.tz_convert(None)
     )
 
-    forecast_df = forecast_df.sort_values("datetime")
+    forecast_df = (
+        forecast_df
+        .sort_values("target_datetime")
+    )
 
     print("\nForecast preview:")
+
     print(forecast_df.head())
 
-    # ===================================
-    # INSERT FORECASTS
-    # ===================================
+    # -----------------------------------
+    # FORMAT DATETIME
+    # -----------------------------------
 
-    forecast_insert_sql = """
-    INSERT INTO electricity_price_forecast (
-        target_datetime,
-        se1,
-        se2,
-        se3,
-        se4
+    forecast_df["target_datetime"] = (
+        forecast_df["target_datetime"]
+        .dt.strftime("%Y-%m-%d %H:%M:%S")
     )
-    VALUES (%s, %s, %s, %s, %s)
-    """
 
-    inserted_forecasts = 0
+    # Snowflake column names
+    forecast_df.columns = [
+        "TARGET_DATETIME",
+        "SE1",
+        "SE2",
+        "SE3",
+        "SE4"
+    ]
 
-    for _, row in forecast_df.iterrows():
+    # ===================================
+    # BULK INSERT FORECASTS
+    # ===================================
 
-        cur.execute(
-            forecast_insert_sql,
-            (
-                row["datetime"].strftime("%Y-%m-%d %H:%M:%S"),
-                row["SE1"],
-                row["SE2"],
-                row["SE3"],
-                row["SE4"],
-            )
+    print(
+        "\nBulk inserting forecasts..."
+    )
+
+    success, nchunks, nrows, _ = (
+        write_pandas(
+            conn,
+            forecast_df,
+            table_name="ELECTRICITY_PRICE_FORECAST",
+            auto_create_table=False
         )
+    )
 
-        inserted_forecasts += 1
-
-    conn.commit()
-
-    print(f"\nInserted {inserted_forecasts} forecast rows.")
+    print(
+        f"\nInserted {nrows} "
+        f"forecast rows."
+    )
 
 else:
 
-    print("\nNo forecast prices available yet.")
+    print(
+        "\nNo forecast prices available yet."
+    )
 
 # ===================================
 # CLEANUP
 # ===================================
 
 cur.close()
+
 conn.close()
 
 print("\nDone.")
