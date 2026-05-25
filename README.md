@@ -1,4 +1,4 @@
-# Swedish Electricity Price Analytics Platform
+# Swedish Electricity Price Analytics Platform 
 
 ## Overview
 
