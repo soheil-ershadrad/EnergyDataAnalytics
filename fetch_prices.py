@@ -20,7 +20,7 @@ zones = ["SE1", "SE2", "SE3", "SE4"]
 # Set to True ONLY ONCE
 # for historical upload
 
-BACKFILL_MODE = False
+BACKFILL_MODE = True
 
 if BACKFILL_MODE:
     days_back = 365
