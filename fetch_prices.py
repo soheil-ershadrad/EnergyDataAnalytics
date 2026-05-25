@@ -32,6 +32,7 @@ else:
 # ===================================
 
 end_date = datetime.today().date()
+
 start_date = end_date - timedelta(days=days_back)
 
 all_data = []
@@ -44,7 +45,9 @@ current_date = start_date
 
 while current_date <= end_date:
 
-    progress = (current_date - start_date).days + 1
+    progress = (
+        current_date - start_date
+    ).days + 1
 
     print(
         f"Fetching actual prices for "
@@ -86,6 +89,7 @@ while current_date <= end_date:
                 price = hour_entry["SEK_per_kWh"]
 
                 if timestamp not in daily_data:
+
                     daily_data[timestamp] = {}
 
                 daily_data[timestamp][zone] = price
@@ -104,11 +108,17 @@ while current_date <= end_date:
     for timestamp, zone_prices in daily_data.items():
 
         row = {
+
             "datetime": timestamp,
+
             "SE1": zone_prices.get("SE1"),
+
             "SE2": zone_prices.get("SE2"),
+
             "SE3": zone_prices.get("SE3"),
-            "SE4": zone_prices.get("SE4"),
+
+            "SE4": zone_prices.get("SE4")
+
         }
 
         all_data.append(row)
@@ -135,13 +145,19 @@ if df.empty:
 # -----------------------------------
 
 df["datetime"] = pd.to_datetime(
+
     df["datetime"],
+
     utc=True
+
 )
 
 df["datetime"] = (
+
     df["datetime"]
+
     .dt.tz_convert(None)
+
 )
 
 # Sort
@@ -168,12 +184,19 @@ print("\nConnecting to Snowflake...")
 try:
 
     conn = snowflake.connector.connect(
+
         user=os.environ["SNOWFLAKE_USER"],
+
         password=os.environ["SNOWFLAKE_PASSWORD"],
+
         account=os.environ["SNOWFLAKE_ACCOUNT"],
+
         warehouse=os.environ["SNOWFLAKE_WAREHOUSE"],
+
         database=os.environ["SNOWFLAKE_DATABASE"],
-        schema=os.environ["SNOWFLAKE_SCHEMA"],
+
+        schema=os.environ["SNOWFLAKE_SCHEMA"]
+
     )
 
     print(
@@ -197,20 +220,31 @@ cur = conn.cursor()
 # ===================================
 
 min_dt = (
+
     df["datetime"]
+
     .min()
+
     .strftime("%Y-%m-%d %H:%M:%S")
+
 )
 
 max_dt = (
+
     df["datetime"]
+
     .max()
+
     .strftime("%Y-%m-%d %H:%M:%S")
+
 )
 
 print(
+
     f"\nDeleting existing rows "
+
     f"between {min_dt} and {max_dt}"
+
 )
 
 delete_sql = """
@@ -231,24 +265,38 @@ print("\nBulk inserting actual prices...")
 
 # Convert datetime to string
 df["datetime"] = (
+
     df["datetime"]
+
     .dt.strftime("%Y-%m-%d %H:%M:%S")
+
 )
 
 # Snowflake column names
 df.columns = [
+
     "DATETIME",
+
     "SE1",
+
     "SE2",
+
     "SE3",
+
     "SE4"
+
 ]
 
 success, nchunks, nrows, _ = write_pandas(
+
     conn,
+
     df,
+
     table_name="ELECTRICITY_PRICES",
+
     auto_create_table=False
+
 )
 
 print(f"\nInserted {nrows} actual rows.")
@@ -262,8 +310,11 @@ print(
 )
 
 tomorrow_date = (
+
     datetime.today().date()
+
     + timedelta(days=1)
+
 )
 
 forecast_data = {}
@@ -300,6 +351,7 @@ for zone in zones:
             price = hour_entry["SEK_per_kWh"]
 
             if timestamp not in forecast_data:
+
                 forecast_data[timestamp] = {}
 
             forecast_data[timestamp][zone] = price
@@ -320,18 +372,22 @@ forecast_rows = []
 for timestamp, zone_prices in forecast_data.items():
 
     row = {
+
         "target_datetime": timestamp,
+
         "SE1": zone_prices.get("SE1"),
+
         "SE2": zone_prices.get("SE2"),
+
         "SE3": zone_prices.get("SE3"),
-        "SE4": zone_prices.get("SE4"),
+
+        "SE4": zone_prices.get("SE4")
+
     }
 
     forecast_rows.append(row)
 
-forecast_df = pd.DataFrame(
-    forecast_rows
-)
+forecast_df = pd.DataFrame(forecast_rows)
 
 if not forecast_df.empty:
 
@@ -340,20 +396,31 @@ if not forecast_df.empty:
     # -----------------------------------
 
     forecast_df["target_datetime"] = (
+
         pd.to_datetime(
+
             forecast_df["target_datetime"],
+
             utc=True
+
         )
+
     )
 
     forecast_df["target_datetime"] = (
+
         forecast_df["target_datetime"]
+
         .dt.tz_convert(None)
+
     )
 
     forecast_df = (
+
         forecast_df
+
         .sort_values("target_datetime")
+
     )
 
     print("\nForecast preview:")
@@ -365,17 +432,26 @@ if not forecast_df.empty:
     # -----------------------------------
 
     forecast_df["target_datetime"] = (
+
         forecast_df["target_datetime"]
+
         .dt.strftime("%Y-%m-%d %H:%M:%S")
+
     )
 
     # Snowflake column names
     forecast_df.columns = [
+
         "TARGET_DATETIME",
+
         "SE1",
+
         "SE2",
+
         "SE3",
+
         "SE4"
+
     ]
 
     # ===================================
@@ -387,12 +463,19 @@ if not forecast_df.empty:
     )
 
     success, nchunks, nrows, _ = (
+
         write_pandas(
+
             conn,
+
             forecast_df,
+
             table_name="ELECTRICITY_PRICE_FORECAST",
+
             auto_create_table=False
+
         )
+
     )
 
     print(
@@ -404,6 +487,146 @@ else:
 
     print(
         "\nNo forecast prices available yet."
+    )
+
+# ===================================
+# TELEGRAM DAILY REPORT
+# ===================================
+
+telegram_query = """
+SELECT
+    target_datetime,
+    se3
+FROM electricity_price_forecast
+WHERE target_datetime >= CURRENT_DATE + 1
+  AND target_datetime < CURRENT_DATE + 2
+ORDER BY target_datetime
+"""
+
+telegram_df = pd.read_sql(
+    telegram_query,
+    conn
+)
+
+if not telegram_df.empty:
+
+    # -----------------------------------
+    # FORMAT DATETIME
+    # -----------------------------------
+
+    telegram_df["target_datetime"] = (
+
+        pd.to_datetime(
+            telegram_df["target_datetime"]
+        )
+
+    )
+
+    # -----------------------------------
+    # PRICE STATISTICS
+    # -----------------------------------
+
+    prices = telegram_df["SE3"]
+
+    low_threshold = prices.quantile(0.25)
+
+    high_threshold = prices.quantile(0.75)
+
+    lowest_price = prices.min()
+
+    highest_price = prices.max()
+
+    average_price = prices.mean()
+
+    # -----------------------------------
+    # CHEAPEST HOURS
+    # -----------------------------------
+
+    cheap_hours = telegram_df[
+        telegram_df["SE3"] <= low_threshold
+    ]["target_datetime"]
+
+    # -----------------------------------
+    # MOST EXPENSIVE HOURS
+    # -----------------------------------
+
+    expensive_hours = telegram_df[
+        telegram_df["SE3"] >= high_threshold
+    ]["target_datetime"]
+
+    # -----------------------------------
+    # FORMAT HOURS
+    # -----------------------------------
+
+    cheap_text = ", ".join(
+
+        cheap_hours.dt.strftime("%H:%M")
+
+    )
+
+    expensive_text = ", ".join(
+
+        expensive_hours.dt.strftime("%H:%M")
+
+    )
+
+    # -----------------------------------
+    # TELEGRAM MESSAGE
+    # -----------------------------------
+
+    message = f"""
+Daily Electricity Report
+
+CHEAPEST HOURS
+{cheap_text}
+
+MOST EXPENSIVE HOURS
+{expensive_text}
+
+Lowest price: {lowest_price:.2f} SEK/kWh
+Highest price: {highest_price:.2f} SEK/kWh
+Average price: {average_price:.2f} SEK/kWh
+"""
+
+    # -----------------------------------
+    # SEND TELEGRAM MESSAGE
+    # -----------------------------------
+
+    bot_token = os.environ[
+        "TELEGRAM_BOT_TOKEN"
+    ]
+
+    chat_id = os.environ[
+        "TELEGRAM_CHAT_ID"
+    ]
+
+    url = (
+        f"https://api.telegram.org/"
+        f"bot{bot_token}/sendMessage"
+    )
+
+    payload = {
+
+        "chat_id": chat_id,
+
+        "text": message
+
+    }
+
+    response = requests.post(
+        url,
+        data=payload
+    )
+
+    print(
+        "\nTelegram report sent!"
+    )
+
+else:
+
+    print(
+        "\nNo forecast data available "
+        "for Telegram report."
     )
 
 # ===================================
