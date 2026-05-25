@@ -17,9 +17,6 @@ zones = ["SE1", "SE2", "SE3", "SE4"]
 # BACKFILL MODE
 # ===================================
 
-# Set to True ONLY ONCE
-# for historical upload
-
 BACKFILL_MODE = False
 
 if BACKFILL_MODE:
@@ -125,7 +122,6 @@ while current_date <= end_date:
 
     current_date += timedelta(days=1)
 
-    # Avoid hammering API
     time.sleep(0.1)
 
 # ===================================
@@ -263,7 +259,6 @@ cur.execute(
 
 print("\nBulk inserting actual prices...")
 
-# Convert datetime to string
 df["datetime"] = (
 
     df["datetime"]
@@ -272,7 +267,6 @@ df["datetime"] = (
 
 )
 
-# Snowflake column names
 df.columns = [
 
     "DATETIME",
@@ -514,10 +508,10 @@ if not telegram_df.empty:
     # FORMAT DATETIME
     # -----------------------------------
 
-    telegram_df["target_datetime"] = (
+    telegram_df["TARGET_DATETIME"] = (
 
         pd.to_datetime(
-            telegram_df["target_datetime"]
+            telegram_df["TARGET_DATETIME"]
         )
 
     )
@@ -544,7 +538,7 @@ if not telegram_df.empty:
 
     cheap_hours = telegram_df[
         telegram_df["SE3"] <= low_threshold
-    ]["target_datetime"]
+    ]["TARGET_DATETIME"]
 
     # -----------------------------------
     # MOST EXPENSIVE HOURS
@@ -552,7 +546,7 @@ if not telegram_df.empty:
 
     expensive_hours = telegram_df[
         telegram_df["SE3"] >= high_threshold
-    ]["target_datetime"]
+    ]["TARGET_DATETIME"]
 
     # -----------------------------------
     # FORMAT HOURS
