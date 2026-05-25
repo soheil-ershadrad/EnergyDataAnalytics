@@ -11,8 +11,7 @@ import snowflake.connector
 
 zones = ["SE1", "SE2", "SE3", "SE4"]
 
-# Fetch only recent days
-# (safer if GitHub Actions misses a run)
+# Fetch recent days
 days_back = 3
 
 end_date = datetime.today().date()
@@ -40,6 +39,7 @@ while current_date <= end_date:
         )
 
         try:
+
             response = requests.get(url, timeout=20)
 
             if response.status_code != 200:
@@ -59,9 +59,13 @@ while current_date <= end_date:
                 daily_data[timestamp][zone] = price
 
         except Exception as e:
+
             print(f"Error for {zone} on {current_date}: {e}")
 
-    # Convert to rows
+    # -----------------------------------
+    # CONVERT TO ROWS
+    # -----------------------------------
+
     for timestamp, zone_prices in daily_data.items():
 
         row = {
@@ -89,15 +93,19 @@ if df.empty:
     print("No data fetched.")
     exit()
 
+# Convert datetime
 df["datetime"] = pd.to_datetime(df["datetime"])
 
-# Remove timezone information
+# Remove timezone info
 df["datetime"] = df["datetime"].dt.tz_localize(None)
 
+# Sort
 df = df.sort_values("datetime")
 
+# Remove duplicates
 df = df.drop_duplicates(subset=["datetime"])
 
+# Reset index
 df = df.reset_index(drop=True)
 
 print("\nPreview:")
@@ -109,24 +117,34 @@ print(df.head())
 
 print("\nConnecting to Snowflake...")
 
-conn = snowflake.connector.connect(
-    user=os.environ["SNOWFLAKE_USER"],
-    password=os.environ["SNOWFLAKE_PASSWORD"],
-    account=os.environ["SNOWFLAKE_ACCOUNT"],
-    warehouse=os.environ["SNOWFLAKE_WAREHOUSE"],
-    database=os.environ["SNOWFLAKE_DATABASE"],
-    schema=os.environ["SNOWFLAKE_SCHEMA"],
-)
+try:
+
+    conn = snowflake.connector.connect(
+        user=os.environ["SNOWFLAKE_USER"],
+        password=os.environ["SNOWFLAKE_PASSWORD"],
+        account=os.environ["SNOWFLAKE_ACCOUNT"],
+        warehouse=os.environ["SNOWFLAKE_WAREHOUSE"],
+        database=os.environ["SNOWFLAKE_DATABASE"],
+        schema=os.environ["SNOWFLAKE_SCHEMA"],
+    )
+
+    print("Snowflake connection successful!")
+
+except Exception as e:
+
+    print("Snowflake connection failed:")
+    print(e)
+
+    raise
 
 cur = conn.cursor()
 
 # -----------------------------------
 # DELETE EXISTING ROWS
-# (prevents duplicates)
 # -----------------------------------
 
-min_dt = df["datetime"].min()
-max_dt = df["datetime"].max()
+min_dt = df["datetime"].min().strftime("%Y-%m-%d %H:%M:%S")
+max_dt = df["datetime"].max().strftime("%Y-%m-%d %H:%M:%S")
 
 print(f"\nDeleting existing rows between {min_dt} and {max_dt}")
 
@@ -161,7 +179,7 @@ for _, row in df.iterrows():
     cur.execute(
         insert_sql,
         (
-            row["datetime"],
+            row["datetime"].strftime("%Y-%m-%d %H:%M:%S"),
             row["SE1"],
             row["SE2"],
             row["SE3"],
@@ -170,6 +188,10 @@ for _, row in df.iterrows():
     )
 
     rows_inserted += 1
+
+# -----------------------------------
+# COMMIT
+# -----------------------------------
 
 conn.commit()
 
