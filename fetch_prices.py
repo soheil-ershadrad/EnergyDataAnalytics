@@ -5,29 +5,44 @@ from datetime import datetime, timedelta
 import time
 import snowflake.connector
 
-# -----------------------------------
+# ===================================
 # SETTINGS
-# -----------------------------------
+# ===================================
 
 zones = ["SE1", "SE2", "SE3", "SE4"]
 
-# Fetch recent days
-days_back = 3
+# ===================================
+# BACKFILL MODE
+# ===================================
+
+# Set to True ONLY ONCE
+# to load historical data
+
+BACKFILL_MODE = True
+
+if BACKFILL_MODE:
+    days_back = 365
+else:
+    days_back = 3
+
+# ===================================
+# DATE RANGE
+# ===================================
 
 end_date = datetime.today().date()
 start_date = end_date - timedelta(days=days_back)
 
 all_data = []
 
-# -----------------------------------
-# FETCH DATA
-# -----------------------------------
+# ===================================
+# FETCH ACTUAL PRICES
+# ===================================
 
 current_date = start_date
 
 while current_date <= end_date:
 
-    print(f"Fetching {current_date}")
+    print(f"Fetching actual prices for {current_date}")
 
     daily_data = {}
 
@@ -83,20 +98,20 @@ while current_date <= end_date:
     # Avoid hammering API
     time.sleep(0.1)
 
-# -----------------------------------
-# CREATE DATAFRAME
-# -----------------------------------
+# ===================================
+# CREATE ACTUAL DATAFRAME
+# ===================================
 
 df = pd.DataFrame(all_data)
 
 if df.empty:
-    print("No data fetched.")
+    print("No actual data fetched.")
     exit()
 
 # Convert datetime
 df["datetime"] = pd.to_datetime(df["datetime"])
 
-# Remove timezone info
+# Remove timezone
 df["datetime"] = df["datetime"].dt.tz_localize(None)
 
 # Sort
@@ -108,12 +123,12 @@ df = df.drop_duplicates(subset=["datetime"])
 # Reset index
 df = df.reset_index(drop=True)
 
-print("\nPreview:")
+print("\nActual prices preview:")
 print(df.head())
 
-# -----------------------------------
+# ===================================
 # CONNECT TO SNOWFLAKE
-# -----------------------------------
+# ===================================
 
 print("\nConnecting to Snowflake...")
 
@@ -139,14 +154,14 @@ except Exception as e:
 
 cur = conn.cursor()
 
-# -----------------------------------
-# DELETE EXISTING ROWS
-# -----------------------------------
+# ===================================
+# DELETE EXISTING ACTUAL ROWS
+# ===================================
 
 min_dt = df["datetime"].min().strftime("%Y-%m-%d %H:%M:%S")
 max_dt = df["datetime"].max().strftime("%Y-%m-%d %H:%M:%S")
 
-print(f"\nDeleting existing rows between {min_dt} and {max_dt}")
+print(f"\nDeleting existing actual rows between {min_dt} and {max_dt}")
 
 delete_sql = """
 DELETE FROM electricity_prices
@@ -155,11 +170,11 @@ WHERE datetime BETWEEN %s AND %s
 
 cur.execute(delete_sql, (min_dt, max_dt))
 
-# -----------------------------------
-# INSERT NEW DATA
-# -----------------------------------
+# ===================================
+# INSERT ACTUAL PRICES
+# ===================================
 
-print("\nInserting new rows...")
+print("\nInserting actual prices...")
 
 insert_sql = """
 INSERT INTO electricity_prices (
@@ -189,17 +204,130 @@ for _, row in df.iterrows():
 
     rows_inserted += 1
 
-# -----------------------------------
-# COMMIT
-# -----------------------------------
-
 conn.commit()
 
-print(f"\nInserted {rows_inserted} rows.")
+print(f"\nInserted {rows_inserted} actual rows.")
 
-# -----------------------------------
+# ===================================
+# FORECAST SECTION
+# ===================================
+
+print("\nFetching tomorrow forecast prices...")
+
+tomorrow_date = datetime.today().date() + timedelta(days=1)
+
+forecast_data = {}
+
+for zone in zones:
+
+    url = (
+        f"https://www.elprisetjustnu.se/api/v1/prices/"
+        f"{tomorrow_date.strftime('%Y/%m-%d')}_{zone}.json"
+    )
+
+    try:
+
+        response = requests.get(url, timeout=20)
+
+        if response.status_code != 200:
+            print(f"No forecast available for {zone}")
+            continue
+
+        data = response.json()
+
+        for hour_entry in data:
+
+            timestamp = hour_entry["time_start"]
+            price = hour_entry["SEK_per_kWh"]
+
+            if timestamp not in forecast_data:
+                forecast_data[timestamp] = {}
+
+            forecast_data[timestamp][zone] = price
+
+    except Exception as e:
+
+        print(f"Forecast error for {zone}: {e}")
+
+# ===================================
+# FORECAST DATAFRAME
+# ===================================
+
+forecast_rows = []
+
+for timestamp, zone_prices in forecast_data.items():
+
+    row = {
+        "datetime": timestamp,
+        "SE1": zone_prices.get("SE1"),
+        "SE2": zone_prices.get("SE2"),
+        "SE3": zone_prices.get("SE3"),
+        "SE4": zone_prices.get("SE4"),
+    }
+
+    forecast_rows.append(row)
+
+forecast_df = pd.DataFrame(forecast_rows)
+
+if not forecast_df.empty:
+
+    forecast_df["datetime"] = pd.to_datetime(
+        forecast_df["datetime"]
+    )
+
+    forecast_df["datetime"] = (
+        forecast_df["datetime"]
+        .dt.tz_localize(None)
+    )
+
+    forecast_df = forecast_df.sort_values("datetime")
+
+    print("\nForecast preview:")
+    print(forecast_df.head())
+
+    # ===================================
+    # INSERT FORECASTS
+    # ===================================
+
+    forecast_insert_sql = """
+    INSERT INTO electricity_price_forecast (
+        target_datetime,
+        se1,
+        se2,
+        se3,
+        se4
+    )
+    VALUES (%s, %s, %s, %s, %s)
+    """
+
+    inserted_forecasts = 0
+
+    for _, row in forecast_df.iterrows():
+
+        cur.execute(
+            forecast_insert_sql,
+            (
+                row["datetime"].strftime("%Y-%m-%d %H:%M:%S"),
+                row["SE1"],
+                row["SE2"],
+                row["SE3"],
+                row["SE4"],
+            )
+        )
+
+        inserted_forecasts += 1
+
+    conn.commit()
+
+    print(f"\nInserted {inserted_forecasts} forecast rows.")
+
+else:
+
+    print("\nNo forecast prices available yet.")
+
+# ===================================
 # CLEANUP
-# -----------------------------------
+# ===================================
 
 cur.close()
 conn.close()
