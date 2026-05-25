@@ -91,6 +91,9 @@ if df.empty:
 
 df["datetime"] = pd.to_datetime(df["datetime"])
 
+# Remove timezone information
+df["datetime"] = df["datetime"].dt.tz_localize(None)
+
 df = df.sort_values("datetime")
 
 df = df.drop_duplicates(subset=["datetime"])
